@@ -112,9 +112,21 @@ The production build writes JavaScript/declarations to `lib`. Tests compile into
 
 Test suites use generated temporary template files, an HTTP boundary double, and local TLS/CONNECT servers. They do not contact Telegram. The localhost certificate/private key under `tests/fixtures` is a public testing identity.
 
-## Releasing this package
+## GitHub Actions
 
-The repository is [nuykon/-semantic-release-tg-bot](https://github.com/nuykon/-semantic-release-tg-bot). Its `release.config.ts` uses Conventional Commits. CircleCI tests Node.js 22.20 and 24 before allowing a release:
+[CI runs](https://github.com/nuykon/semantic-release-tg-bot/actions/workflows/ci.yml) start on pushes, pull requests and manual requests. No secrets are required for verification. Each run checks Node.js **22.20.0** (the supported minimum) and **24** on Linux, using pnpm from the `packageManager` pin and `pnpm-lock.yaml`:
+
+1. Install with `pnpm install --frozen-lockfile`.
+2. Type-check production code, tests, scripts and release configuration.
+3. Run the complete test suite, including local TLS/CONNECT servers.
+4. Compile JavaScript/declarations and build an installable `.tgz` through `pnpm pack`.
+5. Upload the Node.js 24 package as the **npm-package** artifact, retained for seven days.
+
+Third-party actions are pinned to commit SHAs. Pull request checks have read-only repository access. The build workflow does not send Telegram messages or publish packages on ordinary pushes or pull requests.
+
+### Publishing a release
+
+The repository is [nuykon/semantic-release-tg-bot](https://github.com/nuykon/semantic-release-tg-bot). Its `release.config.ts` uses Conventional Commits:
 
 - `main` produces stable versions on npm's `latest` channel.
 - `beta` produces prerelease versions on the `beta` channel.
@@ -122,7 +134,11 @@ The repository is [nuykon/-semantic-release-tg-bot](https://github.com/nuykon/-s
 
 This new package starts at `1.0.0`. Its history does not need a tag from another package. A release creates its version tag and GitHub release notes, then publishes the package. The job does not commit generated version changes back to the repository.
 
-CircleCI needs `GH_TOKEN` with tag/release write access to this repository and `NPM_TOKEN` with publish access to `@nuykon/semantic-release-tg-bot`. Keep Git history and tags available. See [semantic-release configuration](https://semantic-release.org/usage/configuration/) and the [npm plugin's authentication instructions](https://github.com/semantic-release/npm#npm-registry-authentication).
+Add **NPM_TOKEN** under **Settings → Secrets and variables → Actions → Repository secrets**, with publish access to `@nuykon/semantic-release-tg-bot` and npm settings suitable for unattended publication. GitHub supplies `GITHUB_TOKEN` automatically; no separate `GH_TOKEN` secret is needed.
+
+To publish, open **Actions → CI → Run workflow**, select **main** or **beta**, and enable **Publish a release after all checks pass**. Both Node.js checks must succeed before the publishing job can start. A run on another branch cannot publish. Leaving the release input off performs verification only.
+
+Only the publishing job receives repository write permission, and it checks for `NPM_TOKEN` before running semantic-release. The workflow fetches full Git history and tags for version calculation. See [semantic-release on GitHub Actions](https://semantic-release.org/recipes/ci-configurations/github-actions/) and [npm authentication](https://github.com/semantic-release/npm#npm-registry-authentication).
 
 `pnpm run release:dry-run` previews a release while still checking credentials. `pnpm run semantic-release` is the publishing command. The repository does not configure itself as a Telegram recipient; notification settings belong to consuming projects.
 

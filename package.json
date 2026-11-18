@@ -16,7 +16,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nuykon/-semantic-release-tg-bot.git"
+    "url": "git+https://github.com/nuykon/semantic-release-tg-bot.git"
   },
   "files": [
     "README.md",
@@ -35,9 +35,9 @@
   "author": "Sergey Levchenko <sergey@levchenko.pw>",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/nuykon/-semantic-release-tg-bot/issues"
+    "url": "https://github.com/nuykon/semantic-release-tg-bot/issues"
   },
-  "homepage": "https://github.com/nuykon/-semantic-release-tg-bot#readme",
+  "homepage": "https://github.com/nuykon/semantic-release-tg-bot#readme",
   "engines": {
     "node": ">=22.20.0"
   },

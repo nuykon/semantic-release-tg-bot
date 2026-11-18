@@ -1,7 +1,7 @@
 import type {GlobalConfig} from 'semantic-release';
 
 export default {
-  repositoryUrl: 'https://github.com/nuykon/-semantic-release-tg-bot.git',
+  repositoryUrl: 'https://github.com/nuykon/semantic-release-tg-bot.git',
   "branches": [
     "main",
     {
