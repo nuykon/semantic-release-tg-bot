@@ -18,5 +18,6 @@ export const composeNotification = (
             if (failure.stack) paragraphs.push(['```', failure.stack, '```'].join('\n'));
         }
     }
-    return {format: 'markdown', message: paragraphs.join('\n\n')};
+    // Generated content is literal text, not an authored template.
+    return {format: 'markdown', message: () => paragraphs.join('\n\n')};
 };

@@ -2,9 +2,17 @@ import type {Context, TGBotMessageFormat} from '../interfaces/config';
 import * as https from 'node:https';
 import * as proxyAgent from './proxy-agent';
 import {environment} from './configuration';
+import {setTimeout as delay} from 'node:timers/promises';
+import {splitMessage} from './split-message';
+
+const MAX_RETRIES = 3;
+const MAX_RETRY_WAIT_MS = 60_000;
+class RateLimitError extends Error {
+    constructor(message: string, readonly retryAfter: number) { super(message); }
+}
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 1_048_576;
-const sendMessage = async (message: {message: string; format: TGBotMessageFormat}, chatId: string | number, { logger, env }: Context): Promise<void> => {
+const sendPart = async (message: {message: string; format: TGBotMessageFormat}, chatId: string | number, { logger, env }: Context): Promise<void> => {
     const token = env[environment.token];
     if (!token)
         throw new Error('Telegram delivery requires a bot token.');
@@ -53,7 +61,10 @@ const sendMessage = async (message: {message: string; format: TGBotMessageFormat
                     if (response.statusCode !== 200 || result.ok !== true) {
                         // Do not propagate URLs, proxy credentials or the bot token from external errors.
                         const description = String(result.description ?? 'Request failed').split(token).join('[REDACTED]');
-                        reject(new Error(`Telegram API error (${result.error_code ?? response.statusCode}): ${description}`));
+                        const message = `Telegram API error (${result.error_code ?? response.statusCode}): ${description}`;
+                        const retryAfter = result.parameters?.retry_after;
+                        reject((result.error_code ?? response.statusCode) === 429 && Number.isSafeInteger(retryAfter) && retryAfter >= 0
+                            ? new RateLimitError(message, retryAfter) : new Error(message));
                     }
                     else
                         resolve();
@@ -67,6 +78,26 @@ const sendMessage = async (message: {message: string; format: TGBotMessageFormat
     }
     finally {
         agent?.destroy();
+    }
+};
+
+const sendMessage = async (message: {message: string; format: TGBotMessageFormat}, chatId: string | number, runtime: Context): Promise<void> => {
+    // Prepare all parts before any side effects; invalid oversized markup sends nothing.
+    const parts = splitMessage(message.message, message.format);
+    for (const part of parts) {
+        let waited = 0;
+        for (let attempt = 0; ; attempt++) {
+            try {
+                await sendPart({...message, message: part}, chatId, runtime);
+                break;
+            } catch (error) {
+                if (!(error instanceof RateLimitError) || attempt >= MAX_RETRIES || error.retryAfter * 1000 > MAX_RETRY_WAIT_MS - waited) throw error;
+                const milliseconds = error.retryAfter * 1000;
+                waited += milliseconds;
+                runtime.logger.log(`Telegram rate limit: retrying in ${error.retryAfter}s (${attempt + 1}/${MAX_RETRIES}).`);
+                await delay(milliseconds);
+            }
+        }
     }
 };
 

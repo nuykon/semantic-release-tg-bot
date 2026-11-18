@@ -19,6 +19,7 @@ export const notify = async (outcome: ReleaseOutcome, settings: TGBotConfig, run
         commits: runtime.commits,
         errors: runtime.errors,
     };
+    const failures: Error[] = [];
     for (const recipient of settings.notifications ?? []) {
         if (!enabled(outcome, recipient, settings)) continue;
         if (recipient.branch && (!runtime.branch || !posix.matchesGlob(runtime.branch.name, recipient.branch))) continue;
@@ -32,7 +33,14 @@ export const notify = async (outcome: ReleaseOutcome, settings: TGBotConfig, run
         const destinations = Array.isArray(recipient.chatIds) ? recipient.chatIds : [recipient.chatIds];
         for (const destination of destinations) {
             const address = typeof destination === 'string' ? runtime.env[destination] || destination : destination;
-            await sendMessage(content, address, runtime);
+            try {
+                await sendMessage(content, address, runtime);
+            } catch (error) {
+                const failure = error instanceof Error ? error : new Error('Telegram delivery failed.');
+                failures.push(failure);
+                runtime.logger.log(`Telegram delivery failed for ${address}: ${failure.message}`);
+            }
         }
     }
+    if (failures.length) throw new AggregateError(failures, `Telegram delivery failed for ${failures.length} destination(s).`);
 };

@@ -11,6 +11,7 @@
     "src/**/*.ts",
     "tests/**/*.ts",
     "scripts/**/*.ts",
-    "release.config.ts"
+    "release.config.ts",
+    "examples/**/*.ts"
   ]
 }

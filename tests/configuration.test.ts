@@ -4,6 +4,7 @@ import type {Context, TGBotConfig} from '../index';
 import {verifyConditions} from '../index';
 import {packageLabel} from '../src/common/configuration';
 import {composeNotification} from '../src/common/compose-notification';
+import {renderMessage} from '../src/common/render-message';
 
 const settings: TGBotConfig = {notifications: []};
 const runtime = (env: Context['env']): Context => ({env, logger: {log: () => undefined}});
@@ -34,7 +35,7 @@ test('package label priority uses options, explicit environment, then package-ma
 
 test('a successful default notification carries the version and release notes', () => {
     const message = composeNotification('success', '@scope/clock', {nextRelease: {version: '4.8.2', notes: '## Improvements\nFaster startup'}});
-    deepEqual(message, {format: 'markdown', message: '# Release completed\n\nPackage: @scope/clock\n\nVersion: 4.8.2\n\n## Improvements\nFaster startup'});
+    deepEqual(renderMessage(message!), {format: 'markdown', message: '*Release completed*\n\nPackage: @scope/clock\n\nVersion: 4\\.8\\.2\n\n*Improvements*\nFaster startup'});
     equal(composeNotification('success', 'clock', {}), undefined);
 });
 
@@ -42,7 +43,7 @@ test('failure composition survives an early release failure and errors without a
     const issue = new Error('registry unavailable');
     issue.stack = undefined;
     const result = composeNotification('fail', undefined, {errors: [issue]});
-    match(String(result?.message), /^# Release failed\n\nPackage: unnamed package/);
-    match(String(result?.message), /Error: registry unavailable$/);
-    match(String(composeNotification('fail', 'clock', {})?.message), /Package: clock/);
+    match(renderMessage(result!).message, /^\*Release failed\*\n\nPackage: unnamed package/);
+    match(renderMessage(result!).message, /Error: registry unavailable$/);
+    match(renderMessage(composeNotification('fail', 'clock', {})!).message, /Package: clock/);
 });

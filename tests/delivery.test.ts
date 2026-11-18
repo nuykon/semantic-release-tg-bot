@@ -117,3 +117,114 @@ test('a token echoed by Telegram never escapes through the error message', async
     await rejects(sendMessage({message: 'status', format: 'html'}, 12, runtime()), issue =>
         issue instanceof Error && issue.message.includes('[REDACTED]') && !issue.message.includes('test-token-761'));
 });
+
+test('default notes and failures preserve template-like text without evaluating it', async t => {
+    const wire = captureTelegram(t);
+    const literal = '${version} {{ missing }} ${value ?? "fallback"} {% raw %}';
+    await success(settings, runtime({nextRelease: {version: '1.0.0', notes: literal}}));
+    await fail({...settings, notifyOnFail: true}, runtime({errors: [new Error(literal)]}));
+    for (const exchange of wire) {
+        match(exchange.payload.text, /version/);
+        match(exchange.payload.text, /missing/);
+        match(exchange.payload.text, /fallback/);
+        match(exchange.payload.text, /raw/);
+    }
+    equal(wire.length, 2);
+});
+
+test('a custom template inserts release notes once without evaluating their contents', async t => {
+    const wire = captureTelegram(t);
+    const notes = '${value ?? "fallback"} {{ missing }} {% raw %}';
+    await success({...settings, success: {message: '${nextRelease.notes}', format: 'html'}}, runtime({nextRelease: {version: '1', notes}}));
+    equal(wire[0].payload.text, notes);
+});
+
+test('long notifications are sent in order and never exceed the conservative limit', async t => {
+    const wire = captureTelegram(t);
+    const text = '🚀'.repeat(6000);
+    await sendMessage({message: text, format: 'html'}, 77, runtime());
+    ok(wire.length > 1);
+    equal(wire.map(entry => entry.payload.text).join(''), text);
+    ok(wire.every(entry => entry.payload.text.length <= 4096 && entry.payload.chat_id === 77));
+});
+
+const limited = (retryAfter: unknown): Reply => ({status: 429, value: {
+    ok: false, error_code: 429, description: 'Too Many Requests', parameters: {retry_after: retryAfter},
+}});
+const delivered: Reply = {status: 200, value: {ok: true}};
+
+test('429 waits retry_after seconds and retries only the rejected part', async t => {
+    const wire = captureTelegram(t, [delivered, limited(2), delivered, delivered]);
+    t.mock.timers.enable({apis: ['setTimeout']});
+    const pending = sendMessage({message: 'a'.repeat(9000), format: 'html'}, 77, runtime());
+    // HTTP responses run on setImmediate; timers are advanced only after the rejection arrives.
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>(resolve => setImmediate(resolve));
+    equal(wire.length, 2);
+    t.mock.timers.tick(1999);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    equal(wire.length, 2);
+    t.mock.timers.tick(1);
+    await pending;
+    equal(wire.length, 4);
+    equal(wire[1].payload.text, wire[2].payload.text);
+    equal(wire[3].payload.text.length, 808);
+});
+
+test('persistent rate limiting stops after three retries', async t => {
+    const wire = captureTelegram(t, limited(0));
+    await rejects(sendMessage({message: 'text', format: 'html'}, 77, runtime()), /429/);
+    equal(wire.length, 4);
+});
+
+for (const value of [-1, 0.5, '1', null, undefined, 61, Number.MAX_SAFE_INTEGER]) {
+    test(`invalid or excessive retry_after ${String(value)} is not retried`, async t => {
+        const wire = captureTelegram(t, limited(value));
+        await rejects(sendMessage({message: 'text', format: 'html'}, 77, runtime()), /429/);
+        equal(wire.length, 1);
+    });
+}
+
+test('blocked recipients do not prevent other destinations or notification entries from receiving messages', async t => {
+    const wire = captureTelegram(t, [
+        {status: 403, value: {ok: false, description: 'bot blocked'}}, delivered, delivered,
+    ]);
+    await rejects(success({notifications: [{chatIds: [11, 22]}, {chatIds: 33}]}, runtime()), error => {
+        ok(error instanceof AggregateError);
+        equal(error.errors.length, 1);
+        match(error.errors[0].message, /403.*bot blocked/);
+        return true;
+    });
+    deepEqual(wire.map(entry => entry.payload.chat_id), [11, 22, 33]);
+});
+
+test('an ambiguous network failure is not retried and remaining parts for that destination are skipped', async t => {
+    const wire = captureTelegram(t, [delivered, {failure: Object.assign(new Error('lost response'), {code: 'ECONNRESET'})}, delivered]);
+    await rejects(success({success: {message: 'x'.repeat(9000), format: 'html'}, notifications: [{chatIds: [11, 22]}]}, runtime()), AggregateError);
+    deepEqual(wire.map(entry => entry.payload.chat_id), [11, 11, 22, 22, 22]);
+});
+
+test('retry waiting has a total budget per part, not a fresh budget for each retry', async t => {
+    const wire = captureTelegram(t, [limited(40), limited(21), delivered]);
+    t.mock.timers.enable({apis: ['setTimeout']});
+    const pending = rejects(sendMessage({message: 'text', format: 'html'}, 77, runtime()), /429/);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    equal(wire.length, 1);
+    t.mock.timers.tick(40_000);
+    await pending;
+    equal(wire.length, 2);
+});
+
+test('multiple delivery errors are collected with secrets redacted', async t => {
+    const wire = captureTelegram(t, {status: 403, value: {ok: false, description: 'test-token-761 refused'}});
+    await rejects(success({notifications: [{chatIds: [11, 22]}]}, runtime()), error => {
+        ok(error instanceof AggregateError);
+        equal(error.errors.length, 2);
+        for (const failure of error.errors as Error[]) {
+            ok(!failure.message.includes('test-token-761'));
+            match(failure.message, /REDACTED/);
+        }
+        return true;
+    });
+    equal(wire.length, 2);
+});

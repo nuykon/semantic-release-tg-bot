@@ -12,7 +12,7 @@ export type Exchange = {options: https.RequestOptions; payload: TelegramRequest;
 export type Reply = {status: number; value: unknown} | {failure: NodeJS.ErrnoException} | {raw: string};
 
 /** A writable HTTP boundary double; the production client still serializes its own request. */
-export const captureTelegram = (scope: TestContext, reply: Reply = {status: 200, value: {ok: true}}): Exchange[] => {
+export const captureTelegram = (scope: TestContext, replies: Reply | readonly Reply[] = {status: 200, value: {ok: true}}): Exchange[] => {
     const exchanges: Exchange[] = [];
     const implementation = (options: https.RequestOptions, onResponse: (incoming: IncomingMessage) => void): ClientRequest => {
         const body: Buffer[] = [];
@@ -25,6 +25,7 @@ export const captureTelegram = (scope: TestContext, reply: Reply = {status: 200,
                 const bytes = Buffer.concat(body);
                 exchanges.push({options, payload: JSON.parse(bytes.toString('utf8')) as TelegramRequest, bytes: bytes.length});
                 completed();
+                const reply = Array.isArray(replies) ? replies[Math.min(exchanges.length - 1, replies.length - 1)] as Reply : replies as Reply;
                 setImmediate(() => {
                     if ('failure' in reply) {
                         sink.emit('error', reply.failure);
