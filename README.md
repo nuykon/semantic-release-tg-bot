@@ -122,7 +122,7 @@ Test suites use generated temporary template files, an HTTP boundary double, and
 4. Compile JavaScript/declarations and build an installable `.tgz` through `pnpm pack`.
 5. Upload the Node.js 24 package as the **npm-package** artifact, retained for seven days.
 
-Third-party actions are pinned to commit SHAs. Pull request checks have read-only repository access. The build workflow does not send Telegram messages or publish packages on ordinary pushes or pull requests.
+Third-party actions are pinned to commit SHAs. Pull request checks have read-only repository access. Verification does not send Telegram messages. Pull requests never publish packages; pushes to release branches can publish only after both verification jobs pass.
 
 ### Publishing a release
 
@@ -134,11 +134,25 @@ The repository is [nuykon/semantic-release-tg-bot](https://github.com/nuykon/sem
 
 This new package starts at `1.0.0`. Its history does not need a tag from another package. A release creates its version tag and GitHub release notes, then publishes the package. The job does not commit generated version changes back to the repository.
 
-Add **NPM_TOKEN** under **Settings → Secrets and variables → Actions → Repository secrets**, with publish access to `@nuykon/semantic-release-tg-bot` and npm settings suitable for unattended publication. GitHub supplies `GITHUB_TOKEN` automatically; no separate `GH_TOKEN` secret is needed.
+Publication uses **npm Trusted Publishing (OIDC)**. No `NPM_TOKEN` or separate GitHub PAT is required. Only the release job has `id-token: write` for npm authentication and `contents: write` for Git tags/GitHub Releases. GitHub supplies `GITHUB_TOKEN` automatically.
 
-To publish, open **Actions → CI → Run workflow**, select **main** or **beta**, and enable **Publish a release after all checks pass**. Both Node.js checks must succeed before the publishing job can start. A run on another branch cannot publish. Leaving the release input off performs verification only.
+Configure a GitHub Actions Trusted Publisher in the npm package settings with these exact values:
 
-Only the publishing job receives repository write permission, and it checks for `NPM_TOKEN` before running semantic-release. The workflow fetches full Git history and tags for version calculation. See [semantic-release on GitHub Actions](https://semantic-release.org/recipes/ci-configurations/github-actions/) and [npm authentication](https://github.com/semantic-release/npm#npm-registry-authentication).
+| Setting | Value |
+| --- | --- |
+| Organization/user | `nuykon` |
+| Repository | `semantic-release-tg-bot` |
+| Workflow filename | `ci.yml` |
+| Environment | Leave empty (the workflow does not use a GitHub environment) |
+| Allowed actions | Direct publishing (`npm publish`) and distribution-tag management (`npm dist-tag`) |
+
+The installed `@semantic-release/npm` uses npm CLI 11.21.2, which supports OIDC publishing and distribution-tag operations. The release runs on GitHub-hosted Linux with Node.js 24. Keep the Trusted Publisher's workflow filename synchronized if `ci.yml` is renamed.
+
+After a push or merge into **main** or **beta**, the release job runs once both Node.js verification jobs succeed. Other branches and pull requests cannot publish. A manual run of **Actions → CI → Run workflow** can also request a release; with the release input disabled, a manual run only verifies the project. Semantic-release publishes only when Conventional Commits indicate a new version.
+
+The first `1.0.0` publication is bootstrapped with an authenticated npm account. Its `v1.0.0` Git tag must point at exactly the source commit used for that package. Subsequent releases are derived from that tag and the commits after it; do not move the tag or create an unrelated version baseline.
+
+The workflow fetches full history/tags and does not cache release dependencies. Public packages published through npm Trusted Publishing receive provenance automatically. See [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/) and [semantic-release on GitHub Actions](https://semantic-release.org/recipes/ci-configurations/github-actions/).
 
 `pnpm run release:dry-run` previews a release while still checking credentials. `pnpm run semantic-release` is the publishing command. The repository does not configure itself as a Telegram recipient; notification settings belong to consuming projects.
 

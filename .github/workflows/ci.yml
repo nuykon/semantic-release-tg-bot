@@ -71,12 +71,14 @@ jobs:
     name: Publish release
     needs: verify
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.release &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && inputs.release)) &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
+      id-token: write
     steps:
       - name: Check out release history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -94,15 +96,6 @@ jobs:
         with:
           run_install: false
 
-      - name: Check publishing credential
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -z "$NPM_TOKEN" ]; then
-            echo '::error::Add the NPM_TOKEN repository secret before requesting a release.'
-            exit 1
-          fi
-
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
 
@@ -112,5 +105,4 @@ jobs:
       - name: Publish with semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: pnpm run semantic-release
