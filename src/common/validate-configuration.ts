@@ -2,6 +2,7 @@ import {readFileSync, statSync} from 'node:fs';
 import {resolve} from 'node:path';
 import type {Context} from '../interfaces/config';
 import {configurationIssue, environment} from './configuration';
+import {validateTemplate} from './template';
 
 const object = (value: unknown): value is Record<string, unknown> =>
     value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -17,6 +18,13 @@ const chatId = (value: unknown, path: string, env: Context['env']): void => {
     }
     invalid(path, 'expected a nonblank string or a nonzero safe integer.');
 };
+const syntax = (source: string, path: string): void => {
+    try { validateTemplate(source); }
+    catch (error) {
+        // Parser diagnostics contain only the reason and offset, never template contents.
+        invalid(path, error instanceof SyntaxError ? error.message : 'Invalid template syntax.');
+    }
+};
 const content = (value: unknown, path: string): void => {
     if (!object(value)) invalid(path, 'expected a message or file-template object.');
     const hasMessage = Object.hasOwn(value, 'message');
@@ -26,14 +34,17 @@ const content = (value: unknown, path: string): void => {
     if (hasMessage) {
         if (typeof value.message !== 'string' && typeof value.message !== 'function') invalid(`${path}.message`, 'expected a string or synchronous function.');
         if (value.format !== undefined && value.format !== 'html' && value.format !== 'markdown') invalid(`${path}.format`, 'expected html or markdown.');
+        if (typeof value.message === 'string') syntax(value.message, `${path}.message`);
     } else {
         if (!nonblank(value.path)) invalid(`${path}.path`, 'expected a nonblank file path.');
         if (value.format !== undefined) invalid(`${path}.format`, 'file format is selected by its extension.');
+        let source: string;
         try {
             const filename = resolve(value.path);
             if (!statSync(filename).isFile()) throw new Error();
-            readFileSync(filename, 'utf8');
+            source = readFileSync(filename, 'utf8');
         } catch { invalid(`${path}.path`, 'expected a readable regular file relative to the working directory.'); }
+        syntax(source, `${path}.path`);
     }
 };
 const notification = (value: Record<string, unknown>, path: string): void => {
