@@ -4,11 +4,18 @@ import * as proxyAgent from './proxy-agent';
 import {environment} from './configuration';
 import {setTimeout as delay} from 'node:timers/promises';
 import {splitMessage} from './split-message';
+import {notificationError} from './notification-error';
 
 const MAX_RETRIES = 3;
 const MAX_RETRY_WAIT_MS = 60_000;
-class RateLimitError extends Error {
-    constructor(message: string, readonly retryAfter: number) { super(message); }
+class TelegramApiError extends Error {
+    constructor(message: string, readonly telegramCode?: number) { super(message); }
+}
+class RateLimitError extends TelegramApiError {
+    constructor(message: string, readonly retryAfter: number) { super(message, 429); }
+}
+class NetworkError extends Error {
+    constructor(readonly networkCode: string) { super(`Telegram request failed (${networkCode}).`); }
 }
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 1_048_576;
@@ -63,15 +70,17 @@ const sendPart = async (message: {message: string; format: TGBotMessageFormat}, 
                         const description = String(result.description ?? 'Request failed').split(token).join('[REDACTED]');
                         const message = `Telegram API error (${result.error_code ?? response.statusCode}): ${description}`;
                         const retryAfter = result.parameters?.retry_after;
-                        reject((result.error_code ?? response.statusCode) === 429 && Number.isSafeInteger(retryAfter) && retryAfter >= 0
-                            ? new RateLimitError(message, retryAfter) : new Error(message));
+                        const code = result.error_code ?? response.statusCode;
+                        reject(code === 429 && Number.isSafeInteger(retryAfter) && retryAfter >= 0
+                            ? new RateLimitError(message, retryAfter)
+                            : new TelegramApiError(message, Number.isInteger(code) ? code : undefined));
                     }
                     else
                         resolve();
                 });
             });
             req.on('error', (error) => {
-                reject(new Error(`Telegram request failed (${(error as NodeJS.ErrnoException).code ?? 'NETWORK_ERROR'}).`));
+                reject(new NetworkError((error as NodeJS.ErrnoException).code ?? 'NETWORK_ERROR'));
             });
             req.end(body);
         });
@@ -83,15 +92,26 @@ const sendPart = async (message: {message: string; format: TGBotMessageFormat}, 
 
 const sendMessage = async (message: {message: string; format: TGBotMessageFormat}, chatId: string | number, runtime: Context): Promise<void> => {
     // Prepare all parts before any side effects; invalid oversized markup sends nothing.
-    const parts = splitMessage(message.message, message.format);
-    for (const part of parts) {
+    let parts: string[];
+    try {
+        parts = splitMessage(message.message, message.format);
+    } catch (error) {
+        throw notificationError(error, {recipient: chatId, stage: 'split', attempts: 0}, runtime.env);
+    }
+    for (const [index, part] of parts.entries()) {
         let waited = 0;
         for (let attempt = 0; ; attempt++) {
             try {
                 await sendPart({...message, message: part}, chatId, runtime);
                 break;
             } catch (error) {
-                if (!(error instanceof RateLimitError) || attempt >= MAX_RETRIES || error.retryAfter * 1000 > MAX_RETRY_WAIT_MS - waited) throw error;
+                if (!(error instanceof RateLimitError) || attempt >= MAX_RETRIES || error.retryAfter * 1000 > MAX_RETRY_WAIT_MS - waited) {
+                    throw notificationError(error, {
+                        recipient: chatId, stage: 'delivery', part: index + 1, totalParts: parts.length, attempts: attempt + 1,
+                        telegramCode: error instanceof TelegramApiError ? error.telegramCode : undefined,
+                        networkCode: error instanceof NetworkError ? error.networkCode : undefined,
+                    }, runtime.env);
+                }
                 const milliseconds = error.retryAfter * 1000;
                 waited += milliseconds;
                 runtime.logger.log(`Telegram rate limit: retrying in ${error.retryAfter}s (${attempt + 1}/${MAX_RETRIES}).`);

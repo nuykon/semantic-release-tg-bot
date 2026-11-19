@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import {equal, deepEqual, ok, rejects, match} from 'node:assert/strict';
-import {success, fail, type Context, type TGBotConfig} from '../index';
+import {success, fail, TelegramNotificationError, type Context, type TGBotConfig} from '../index';
 import {sendMessage} from '../src/common/send-message';
 import {ProxyAgent} from '../src/common/proxy-agent';
 import {captureTelegram, type Reply} from './support/telegram-double';
@@ -241,7 +241,7 @@ for (const source of [
             {chatIds: 22, success: {message: 'ready'}},
         ]}, runtime()), error => {
             ok(error instanceof AggregateError);
-            equal(error.errors.length, 1);
+            equal(error.errors.length, 2);
             return true;
         });
         deepEqual(wire.map(entry => entry.payload.chat_id), [22]);
@@ -276,4 +276,79 @@ for (const hook of [success, fail]) {
 test('explicit failOnError true preserves strict delivery behavior', async t => {
     captureTelegram(t, {status: 403, value: {ok: false, description: 'blocked'}});
     await rejects(success({...settings, failOnError: true}, runtime()), AggregateError);
+});
+
+test('delivery failure identifies recipient, failed part, attempts and Telegram error code', async t => {
+    captureTelegram(t, [delivered, limited(0), {status: 403, value: {ok: false, error_code: 403, description: 'blocked'}}]);
+    await rejects(success({success: {message: 'x'.repeat(9000), format: 'html'}, notifications: [{chatIds: 'PERSON'}]}, {
+        ...runtime(), env: {...runtime().env, PERSON: '9988'},
+    }), error => {
+        ok(error instanceof AggregateError);
+        const failure = error.errors[0];
+        ok(failure instanceof TelegramNotificationError);
+        equal(failure.recipient, '9988');
+        equal(failure.notificationIndex, 0);
+        equal(failure.stage, 'delivery');
+        equal(failure.part, 2);
+        equal(failure.totalParts, 3);
+        equal(failure.attempts, 2);
+        equal(failure.telegramCode, 403);
+        return true;
+    });
+});
+
+test('exhausted rate-limit errors expose all four attempts', async t => {
+    captureTelegram(t, limited(0));
+    await rejects(sendMessage({message: 'x', format: 'html'}, 77, runtime()), error => {
+        ok(error instanceof TelegramNotificationError);
+        equal(error.attempts, 4);
+        equal(error.telegramCode, 429);
+        return true;
+    });
+});
+
+test('network failures keep their network code but omit an unavailable Telegram code', async t => {
+    captureTelegram(t, {failure: Object.assign(new Error('token-bearing URL'), {code: 'ECONNRESET'})});
+    await rejects(sendMessage({message: 'x', format: 'html'}, 77, runtime()), error => {
+        ok(error instanceof TelegramNotificationError);
+        equal(error.networkCode, 'ECONNRESET');
+        equal(error.telegramCode, undefined);
+        equal(error.attempts, 1);
+        return true;
+    });
+});
+
+test('template errors identify every affected recipient and never retain unsafe causes', async () => {
+    const logs: string[] = [];
+    const context = runtime({logger: {log: message => logs.push(message)}});
+    context.env.TELEGRAM_BOT_PROXY = 'http://user:p%3Assword@relay:8888';
+    const secretText = `${context.env.TELEGRAM_BOT_TOKEN} ${context.env.TELEGRAM_BOT_PROXY} p%3Assword p:ssword`;
+    await rejects(success({notifications: [{chatIds: [11, 22], success: {message: (): string => {throw new Error(secretText);}}}]}, context), error => {
+        ok(error instanceof AggregateError);
+        deepEqual(error.errors.map((failure: TelegramNotificationError) => failure.recipient), [11, 22]);
+        for (const failure of error.errors as TelegramNotificationError[]) {
+            equal(failure.stage, 'template');
+            equal(failure.attempts, 0);
+            equal(failure.part, undefined);
+            equal(failure.cause, undefined);
+            ok(!String(failure.stack).includes('test-token-761'));
+            ok(!JSON.stringify(failure).includes('p%3Assword'));
+            ok(!JSON.stringify(failure).includes('p:ssword'));
+        }
+        return true;
+    });
+    ok(logs.every(message => !message.includes('test-token-761') && !message.includes('p:ssword')));
+});
+
+test('split errors have no delivery attempts and send no requests', async t => {
+    const wire = captureTelegram(t);
+    await rejects(sendMessage({message: '<b>' + 'x'.repeat(5000), format: 'html'}, 77, runtime()), error => {
+        ok(error instanceof TelegramNotificationError);
+        equal(error.stage, 'split');
+        equal(error.recipient, 77);
+        equal(error.attempts, 0);
+        equal(error.part, undefined);
+        return true;
+    });
+    equal(wire.length, 0);
 });

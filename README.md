@@ -63,7 +63,7 @@ Messages are split automatically and sent sequentially to each destination. Each
 
 Only an explicit Telegram rate-limit error (`429`) with a nonnegative integer `parameters.retry_after` is retried. The plugin waits that many seconds and retries the rejected part, with **up to three retries and at most 60 seconds of total retry waiting per part**. A delay exceeding the remaining budget is rejected without waiting. Already delivered parts are not repeated.
 
-Other API errors, invalid responses, timeouts and network failures are not retried: an ambiguous response can mean Telegram already accepted the message. If a part fails, remaining parts for that destination are skipped. Delivery continues to the other destinations and notification entries. A template read, interpolation or callback error skips only that notification entry; subsequent entries are still processed. Each template is rendered once per entry, rather than once per destination. By default (`failOnError: true`), after attempting them all, the hook throws an `AggregateError` containing the notification errors; semantic-release therefore still sees the failure. Set the root option `failOnError: false` to log template/delivery errors and resolve the hook successfully after all entries have been attempted. Configuration verification errors always throw, regardless of this setting. Retrying the entire hook manually can repeat earlier successful deliveries.
+Other API errors, invalid responses, timeouts and network failures are not retried: an ambiguous response can mean Telegram already accepted the message. If a part fails, remaining parts for that destination are skipped. Delivery continues to the other destinations and notification entries. A template read, interpolation or callback error skips only that notification entry; subsequent entries are still processed. Each template is rendered once per entry, rather than once per destination. If rendering fails for a multi-destination entry, a separate error identifies each affected destination. By default (`failOnError: true`), after attempting them all, the hook throws an `AggregateError` containing the notification errors; semantic-release therefore still sees the failure. Set the root option `failOnError: false` to log template/delivery errors and resolve the hook successfully after all entries have been attempted. Configuration verification errors always throw, regardless of this setting. Retrying the entire hook manually can repeat earlier successful deliveries.
 
 For example, make notification delivery optional while retaining configuration checks:
 
@@ -75,6 +75,42 @@ For example, make notification delivery optional while retaining configuration c
 ```
 
 `failOnError` is a root option; it is not overridden per recipient. It applies to both success and failure hooks.
+
+### Error details
+
+In strict mode, every item in `AggregateError.errors` is an exported `TelegramNotificationError`. Its message also appears in the release logger, including in `failOnError: false` mode.
+
+| Property | Meaning |
+| --- | --- |
+| `recipient` | Resolved destination ID, after environment alias lookup |
+| `notificationIndex` | Zero-based entry index in `notifications` |
+| `stage` | `template`, `split` or `delivery` |
+| `part`, `totalParts` | One-based failed part and total count; absent before splitting succeeds |
+| `attempts` | Delivery attempts for the failed part, including the initial attempt; zero for template/split failures |
+| `telegramCode` | Telegram `error_code`, or HTTP status when the API omitted it; absent for network failures |
+| `networkCode` | Node.js network error code, when available |
+| `reason` | Sanitized failure description |
+
+The bot token, configured proxy URL and its encoded/decoded password are redacted in notification error messages and metadata. Errors do not retain the original cause or stack, which might include credentials. An example log entry is:
+
+```text
+Telegram delivery failed for 12345, part 2/3, attempts 4: Telegram API error (429): Too Many Requests
+```
+
+For programmatic use, the error class and `NotificationFailureDetails` type are available from `@nuykon/semantic-release-tg-bot`:
+
+```ts
+import {TelegramNotificationError} from '@nuykon/semantic-release-tg-bot';
+
+function reportNotificationErrors(error: unknown): void {
+  if (!(error instanceof AggregateError)) throw error;
+  for (const failure of error.errors) {
+    if (failure instanceof TelegramNotificationError) {
+      console.error(failure.recipient, failure.stage, failure.part, failure.attempts, failure.telegramCode);
+    }
+  }
+}
+```
 
 These limits follow the [Telegram sendMessage](https://core.telegram.org/bots/api#sendmessage) and [ResponseParameters](https://core.telegram.org/bots/api#responseparameters) contracts.
 
