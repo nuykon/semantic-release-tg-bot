@@ -1,8 +1,15 @@
 import type {Context, TGBotConfig} from './interfaces/config';
+import {validateConfiguration} from './common/validate-configuration';
 import {configurationIssue, environment, packageLabel} from './common/configuration';
 
-/** Validate the two inputs needed to build and deliver default notifications. */
+/** Validate configuration before semantic-release starts publishing. */
 export const verifyConditions = (settings: TGBotConfig, runtime: Context): void => {
+    try {
+        validateConfiguration(settings, runtime.env);
+    } catch (error) {
+        if (error instanceof Error && 'details' in error) runtime.logger.log(String(error.details));
+        throw error;
+    }
     const requirements = [
         {
             satisfied: Boolean(runtime.env[environment.token]?.trim()),

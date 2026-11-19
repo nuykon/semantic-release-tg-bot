@@ -11,13 +11,13 @@ export const packageLabel = (settings: TGBotConfig, variables: Context['env']): 
         .find(candidate => typeof candidate === 'string' && candidate.trim().length > 0);
 
 export type ConfigurationIssue = Error & {
-    code: 'ENOTELEGRAMTOKEN' | 'ENOPACKAGENAME';
+    code: 'ENOTELEGRAMTOKEN' | 'ENOPACKAGENAME' | 'ENOTELEGRAMCONFIG';
     details: string;
     semanticRelease: true;
 };
 
 export const configurationIssue = (code: ConfigurationIssue['code'], details: string): ConfigurationIssue =>
-    Object.assign(new Error(`Telegram notification configuration is incomplete (${code}).`), {
+    Object.assign(new Error(`Telegram notification configuration is invalid (${code}).`), {
         name: 'TelegramConfigurationError',
         code,
         details,
