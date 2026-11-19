@@ -25,7 +25,15 @@ export const notify = async (outcome: ReleaseOutcome, settings: TGBotConfig, run
         if (recipient.branch && (!runtime.branch || !posix.matchesGlob(runtime.branch.name, recipient.branch))) continue;
         const source = recipient[outcome] ?? settings[outcome] ?? composeNotification(outcome, values.packageName, runtime);
         if (source === undefined) continue;
-        const content = renderMessage(source, values);
+        let content: ReturnType<typeof renderMessage>;
+        try {
+            content = renderMessage(source, values);
+        } catch (error) {
+            const failure = error instanceof Error ? error : new Error('Telegram template rendering failed.');
+            failures.push(failure);
+            runtime.logger.log(`Telegram template rendering failed: ${failure.message}`);
+            continue;
+        }
         if (content.message.length === 0) {
             runtime.logger.log(`Skipped an empty ${outcome} notification.`);
             continue;
@@ -42,5 +50,5 @@ export const notify = async (outcome: ReleaseOutcome, settings: TGBotConfig, run
             }
         }
     }
-    if (failures.length) throw new AggregateError(failures, `Telegram delivery failed for ${failures.length} destination(s).`);
+    if (failures.length) throw new AggregateError(failures, `Telegram delivery failed for ${failures.length} notification(s).`);
 };

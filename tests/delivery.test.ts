@@ -228,3 +228,33 @@ test('multiple delivery errors are collected with secrets redacted', async t => 
     });
     equal(wire.length, 2);
 });
+
+for (const source of [
+    {message: '${value ?? "fallback"}'},
+    {message: (): string => {throw new Error('callback failed');}},
+    {path: '/a-template-that-does-not-exist/release.html'},
+]) {
+    test(`template failure does not stop later entries: ${'path' in source ? 'file' : typeof source.message}`, async t => {
+        const wire = captureTelegram(t);
+        await rejects(success({notifications: [
+            {chatIds: [11, 12], success: source},
+            {chatIds: 22, success: {message: 'ready'}},
+        ]}, runtime()), error => {
+            ok(error instanceof AggregateError);
+            equal(error.errors.length, 1);
+            return true;
+        });
+        deepEqual(wire.map(entry => entry.payload.chat_id), [22]);
+    });
+}
+
+test('failure hook also isolates thrown template errors and renders once per entry', async t => {
+    const wire = captureTelegram(t);
+    let rendered = 0;
+    await rejects(fail({notifyOnFail: true, notifications: [
+        {chatIds: 11, fail: {message: (): string => {throw 'not an Error';}}},
+        {chatIds: [22, 33], fail: {message: () => {rendered++; return 'failure details';}}},
+    ]}, runtime()), AggregateError);
+    equal(rendered, 1);
+    deepEqual(wire.map(entry => entry.payload.chat_id), [22, 33]);
+});
