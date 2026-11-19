@@ -109,3 +109,13 @@ test('verification accepts readable file templates and resolves paths from the w
     rmSync(path);
     throws(() => verifyConditions({...settings, success: {path}}, runtime(validEnv)), /ENOTELEGRAMCONFIG/);
 });
+
+test('failOnError only accepts booleans and never suppresses verification failures', () => {
+    for (const flag of [true, false]) {
+        doesNotThrow(() => verifyConditions({...settings, failOnError: flag}, runtime(validEnv)));
+    }
+    // @ts-expect-error Exercise JSON/JavaScript input validation.
+    throws(() => verifyConditions({...settings, failOnError: 'false'}, runtime(validEnv)), /ENOTELEGRAMCONFIG/);
+    throws(() => verifyConditions({...settings, failOnError: false, notifications: [{chatIds: ''}]}, runtime(validEnv)), /ENOTELEGRAMCONFIG/);
+    throws(() => verifyConditions({...settings, failOnError: false}, runtime({})), /ENOTELEGRAMTOKEN/);
+});

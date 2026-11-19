@@ -44,6 +44,8 @@ export type TGBotNotificationConfig = TGBotNotify & {
     chatIds: TGBotChatId | TGBotChatId[];
 };
 export type TGBotConfig = TGBotNotify & {
+    /** Throw collected notification errors after delivery; defaults to true. */
+    failOnError?: boolean;
     packageName?: string;
     notifications: TGBotNotificationConfig[];
 };

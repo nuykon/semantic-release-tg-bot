@@ -47,7 +47,7 @@ TLS certificate validation stays enabled for both connections. SOCKS is outside 
 
 ## Notification rules
 
-The root options are `notifications`, optional `packageName`, `success`, `fail`, `notifyOnSuccess` and `notifyOnFail`.
+The root options are `notifications`, optional `packageName`, `success`, `fail`, `notifyOnSuccess`, `notifyOnFail` and `failOnError`.
 
 Every entry in `notifications` contains `chatIds` and may override either message or either notification flag. It may also specify `branch`, matched with Node.js `path.posix.matchesGlob`. For example, `stable/*.x` accepts `stable/4.x`; `stable/**` also accepts deeper paths. Brace patterns such as `{main,beta}` and extglobs such as `@(main|beta)` are supported by the Node.js matcher.
 
@@ -63,7 +63,18 @@ Messages are split automatically and sent sequentially to each destination. Each
 
 Only an explicit Telegram rate-limit error (`429`) with a nonnegative integer `parameters.retry_after` is retried. The plugin waits that many seconds and retries the rejected part, with **up to three retries and at most 60 seconds of total retry waiting per part**. A delay exceeding the remaining budget is rejected without waiting. Already delivered parts are not repeated.
 
-Other API errors, invalid responses, timeouts and network failures are not retried: an ambiguous response can mean Telegram already accepted the message. If a part fails, remaining parts for that destination are skipped. Delivery continues to the other destinations and notification entries. A template read, interpolation or callback error skips only that notification entry; subsequent entries are still processed. Each template is rendered once per entry, rather than once per destination. After attempting them all, the hook throws an `AggregateError` containing the delivery errors; semantic-release therefore still sees the failure. Retrying the entire hook manually can repeat earlier successful deliveries.
+Other API errors, invalid responses, timeouts and network failures are not retried: an ambiguous response can mean Telegram already accepted the message. If a part fails, remaining parts for that destination are skipped. Delivery continues to the other destinations and notification entries. A template read, interpolation or callback error skips only that notification entry; subsequent entries are still processed. Each template is rendered once per entry, rather than once per destination. By default (`failOnError: true`), after attempting them all, the hook throws an `AggregateError` containing the notification errors; semantic-release therefore still sees the failure. Set the root option `failOnError: false` to log template/delivery errors and resolve the hook successfully after all entries have been attempted. Configuration verification errors always throw, regardless of this setting. Retrying the entire hook manually can repeat earlier successful deliveries.
+
+For example, make notification delivery optional while retaining configuration checks:
+
+```ts
+{
+  notifications: [{chatIds: 'RELEASE_DESTINATION'}],
+  failOnError: false,
+}
+```
+
+`failOnError` is a root option; it is not overridden per recipient. It applies to both success and failure hooks.
 
 These limits follow the [Telegram sendMessage](https://core.telegram.org/bots/api#sendmessage) and [ResponseParameters](https://core.telegram.org/bots/api#responseparameters) contracts.
 

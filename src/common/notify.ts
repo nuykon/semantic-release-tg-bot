@@ -50,5 +50,5 @@ export const notify = async (outcome: ReleaseOutcome, settings: TGBotConfig, run
             }
         }
     }
-    if (failures.length) throw new AggregateError(failures, `Telegram delivery failed for ${failures.length} notification(s).`);
+    if (failures.length && settings.failOnError !== false) throw new AggregateError(failures, `Telegram delivery failed for ${failures.length} notification(s).`);
 };

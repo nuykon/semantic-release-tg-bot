@@ -50,6 +50,7 @@ export const validateConfiguration = (settings: unknown, env: Context['env']): v
     if (!object(settings)) invalid('options', 'expected an object.');
     if (!Array.isArray(settings.notifications)) invalid('notifications', 'expected an array (an empty array disables delivery).');
     if (settings.packageName !== undefined && !nonblank(settings.packageName)) invalid('packageName', 'expected a nonblank string.');
+    if (settings.failOnError !== undefined && typeof settings.failOnError !== 'boolean') invalid('failOnError', 'expected a boolean.');
     notification(settings, 'options');
     for (const [index, recipient] of settings.notifications.entries()) {
         const path = `notifications[${index}]`;

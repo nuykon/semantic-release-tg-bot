@@ -258,3 +258,22 @@ test('failure hook also isolates thrown template errors and renders once per ent
     equal(rendered, 1);
     deepEqual(wire.map(entry => entry.payload.chat_id), [22, 33]);
 });
+
+for (const hook of [success, fail]) {
+    test(`${hook.name} logs errors and continues when failOnError is false`, async t => {
+        const wire = captureTelegram(t, [{status: 403, value: {ok: false, description: 'blocked'}}, delivered]);
+        const logs: string[] = [];
+        await hook({failOnError: false, notifyOnFail: true, notifications: [
+            {chatIds: 11, success: {message: () => {throw new Error('template failure');}}, fail: {message: () => {throw new Error('template failure');}}},
+            {chatIds: [22, 33]},
+        ]}, runtime({logger: {log: text => logs.push(text)}}));
+        deepEqual(wire.map(entry => entry.payload.chat_id), [22, 33]);
+        ok(logs.some(text => text.includes('template failure')));
+        ok(logs.some(text => text.includes('blocked')));
+    });
+}
+
+test('explicit failOnError true preserves strict delivery behavior', async t => {
+    captureTelegram(t, {status: 403, value: {ok: false, description: 'blocked'}});
+    await rejects(success({...settings, failOnError: true}, runtime()), AggregateError);
+});
