@@ -75,3 +75,27 @@ test('invalid long markup is rejected instead of silently repaired', () => {
     throws(() => splitMessage('<b>' + 'x'.repeat(5000) + '</i>', 'html'), /Unbalanced/);
     throws(() => splitMessage('*' + 'x'.repeat(5000), 'markdown'), /Unbalanced/);
 });
+
+for (const grapheme of ['e\u0301', '👨‍👩‍👧‍👦', '🇷🇺', '👍🏽']) {
+    test(`visible grapheme ${grapheme} remains intact at the limit`, () => {
+        const prefix = 'a'.repeat(4095);
+        const parts = splitMessage(prefix + grapheme, 'html');
+        deepEqual(parts, [prefix, grapheme]);
+    });
+}
+
+test('splitting prefers paragraph, then line, then word boundaries without losing text', () => {
+    for (const separator of ['\n\n', '\n', ' ']) {
+        const prefix = 'a'.repeat(3000) + separator;
+        const text = prefix + 'b'.repeat(2000);
+        const parts = splitMessage(text, 'html');
+        equal(parts[0], prefix);
+        equal(parts.join(''), text);
+    }
+});
+
+test('whitespace-only fragments are omitted, including entirely blank messages', () => {
+    deepEqual(splitMessage('x'.repeat(4096) + ' '.repeat(4096) + 'y', 'html'), ['x'.repeat(4096), 'y']);
+    deepEqual(splitMessage(' \n\t', 'markdown'), []);
+    deepEqual(splitMessage(' '.repeat(9000), 'html'), []);
+});
